@@ -172,6 +172,3 @@ Here is a breakdown of the standard `config.toml` structure dynamically dropped 
 **Error:** User selects a correct password but receives "Invalid Password."
 **Solution:** Ensure the client and server code are mirrored correctly. Abandoned GUI parameters occasionally drop payload arrays if the UI bugs out locally. Validate through the standard `/voicechat join` commands as a bypass mechanic. 
 
-### Server Console Logging Not Showing
-**Error:** Calls to the `info!`, `warn!`, or `error!` tracing macros from inside the UDP server (such as `udp/server.rs`) do not output to the PumpkinMC server console.
-**Reason:** The PumpkinMC plugin architecture and tracing-subscriber registry exist on the main Pumpkin asynchronous Tokio runtime. However, the Pumpkin plugin API does not currently expose the server's Tokio runtime or handle to plugins. Because of this limitation, the UDP sockets in this plugin are forced to spawn on a *completely separate, detached Tokio runtime* (`lib::GLOBAL_RUNTIME`). Since the tracing subscriber is strictly localized to the main thread's runtime context layer, any logging invoked in the secondary runtime silently drops into the void instead of printing to standard output.

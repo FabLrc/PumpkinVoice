@@ -6,26 +6,107 @@ pub mod state;
 pub mod util;
 
 use std::sync::Arc;
-use tracing::{error, info};
 
 use handlers::{CustomPayloadHandler, JoinHandler, LeaveHandler};
 use net::custom_payloads::PLUGIN_MESSAGE_PORT;
+use pumpkin_api_macros::{plugin_impl, plugin_method};
 use state::StateManager;
 
-pub static GLOBAL_RUNTIME: std::sync::LazyLock<std::sync::Arc<tokio::runtime::Runtime>> =
-    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::runtime::Runtime::new().unwrap()));
+#[plugin_method]
+async fn on_load(&mut self, context: Arc<pumpkin::plugin::Context>) -> Result<(), String> {
+    context.init_log();
+    tracing::info!("Simple Voice Chat for PumpkinMC loading...");
 
-#[unsafe(no_mangle)]
-pub static METADATA: pumpkin::plugin::PluginMetadata = pumpkin::plugin::PluginMetadata {
-    name: env!("CARGO_PKG_NAME"),
-    version: env!("CARGO_PKG_VERSION"),
-    authors: env!("CARGO_PKG_AUTHORS"),
-    description: env!("CARGO_PKG_DESCRIPTION"),
-};
+    let state_manager = self.state_manager.clone();
+    let state_manager_clone = state_manager.clone();
+    let server_clone = context.server.clone();
 
-#[unsafe(no_mangle)]
-pub static PUMPKIN_API_VERSION: u32 = pumpkin::plugin::PLUGIN_API_VERSION;
+    // Spawn UDP Server background task
+    crate::GLOBAL_RUNTIME.spawn(async move {
+        let port = if crate::config::CONFIG.port == -1 {
+            PLUGIN_MESSAGE_PORT as u16
+        } else {
+            crate::config::CONFIG.port as u16
+        };
 
+        let bind_address = if crate::config::CONFIG.bind_address.is_empty() {
+            "0.0.0.0"
+        } else {
+            &crate::config::CONFIG.bind_address
+        };
+
+        let server_addr = format!("{}:{}", bind_address, port);
+
+        let udp_server = crate::net::UdpServer::new(state_manager_clone, server_clone);
+        if let Err(e) = udp_server.start(&server_addr).await {
+            tracing::error!("Failed to start UDP server: {}", e);
+        }
+    });
+
+    let join_handler = Arc::new(JoinHandler {
+        state_manager: state_manager.clone(),
+    });
+    context
+        .register_event(join_handler, pumpkin::plugin::EventPriority::Normal, true)
+        .await;
+
+    let payload_handler = Arc::new(CustomPayloadHandler {
+        state_manager: state_manager.clone(),
+    });
+    context
+        .register_event(
+            payload_handler,
+            pumpkin::plugin::EventPriority::Normal,
+            true,
+        )
+        .await;
+
+    let leave_handler = Arc::new(LeaveHandler {
+        state_manager: state_manager.clone(),
+    });
+    context
+        .register_event(leave_handler, pumpkin::plugin::EventPriority::Normal, true)
+        .await;
+
+    let permission_cmd = pumpkin_util::permission::Permission::new(
+        "pumpkin_voice:command.voicechat",
+        "Access to voicechat group commands",
+        pumpkin_util::permission::PermissionDefault::Allow,
+    );
+    let _ = context.register_permission(permission_cmd).await;
+
+    let permission_speak = pumpkin_util::permission::Permission::new(
+        "pumpkin_voice:speak",
+        "Allows a player to send voice chat audio",
+        pumpkin_util::permission::PermissionDefault::Allow,
+    );
+    let _ = context.register_permission(permission_speak).await;
+
+    let permission_listen = pumpkin_util::permission::Permission::new(
+        "pumpkin_voice:listen",
+        "Allows a player to receive voice chat audio",
+        pumpkin_util::permission::PermissionDefault::Allow,
+    );
+    let _ = context.register_permission(permission_listen).await;
+
+    let permission_groups = pumpkin_util::permission::Permission::new(
+        "pumpkin_voice:groups",
+        "Allows a player to use voice chat groups",
+        pumpkin_util::permission::PermissionDefault::Allow,
+    );
+    let _ = context.register_permission(permission_groups).await;
+
+    context
+        .register_command(
+            commands::init_command_tree(state_manager.clone()),
+            "pumpkin_voice:command.voicechat",
+        )
+        .await;
+
+    Ok(())
+}
+
+#[plugin_impl]
 pub struct VoiceChatPlugin {
     state_manager: Arc<StateManager>,
 }
@@ -43,109 +124,4 @@ impl Default for VoiceChatPlugin {
     fn default() -> Self {
         Self::new()
     }
-}
-
-impl pumpkin::plugin::Plugin for VoiceChatPlugin {
-    fn on_load(
-        &mut self,
-        context: Arc<pumpkin::plugin::Context>,
-    ) -> pumpkin::plugin::PluginFuture<'_, Result<(), String>> {
-        let state_manager = self.state_manager.clone();
-        Box::pin(async move {
-            context.init_log();
-            info!("Simple Voice Chat for PumpkinMC loading...");
-
-            let state_manager_clone = state_manager.clone();
-            let server_clone = context.server.clone();
-
-            // Spawn UDP Server background task
-            GLOBAL_RUNTIME.spawn(async move {
-                let port = if crate::config::CONFIG.port == -1 {
-                    PLUGIN_MESSAGE_PORT as u16
-                } else {
-                    crate::config::CONFIG.port as u16
-                };
-
-                let bind_address = if crate::config::CONFIG.bind_address.is_empty() {
-                    "0.0.0.0"
-                } else {
-                    &crate::config::CONFIG.bind_address
-                };
-
-                let server_addr = format!("{}:{}", bind_address, port);
-
-                let udp_server = crate::net::UdpServer::new(state_manager_clone, server_clone);
-                if let Err(e) = udp_server.start(&server_addr).await {
-                    error!("Failed to start UDP server: {}", e);
-                }
-            });
-
-            let join_handler = Arc::new(JoinHandler {
-                state_manager: state_manager.clone(),
-            });
-            context
-                .register_event(join_handler, pumpkin::plugin::EventPriority::Normal, true)
-                .await;
-
-            let payload_handler = Arc::new(CustomPayloadHandler {
-                state_manager: state_manager.clone(),
-            });
-            context
-                .register_event(
-                    payload_handler,
-                    pumpkin::plugin::EventPriority::Normal,
-                    true,
-                )
-                .await;
-
-            let leave_handler = Arc::new(LeaveHandler {
-                state_manager: state_manager.clone(),
-            });
-            context
-                .register_event(leave_handler, pumpkin::plugin::EventPriority::Normal, true)
-                .await;
-
-            let permission_cmd = pumpkin_util::permission::Permission::new(
-                "pumpkin_voice:command.voicechat",
-                "Access to voicechat group commands",
-                pumpkin_util::permission::PermissionDefault::Allow,
-            );
-            let _ = context.register_permission(permission_cmd).await;
-
-            let permission_speak = pumpkin_util::permission::Permission::new(
-                "pumpkin_voice:speak",
-                "Allows a player to send voice chat audio",
-                pumpkin_util::permission::PermissionDefault::Allow,
-            );
-            let _ = context.register_permission(permission_speak).await;
-
-            let permission_listen = pumpkin_util::permission::Permission::new(
-                "pumpkin_voice:listen",
-                "Allows a player to receive voice chat audio",
-                pumpkin_util::permission::PermissionDefault::Allow,
-            );
-            let _ = context.register_permission(permission_listen).await;
-
-            let permission_groups = pumpkin_util::permission::Permission::new(
-                "pumpkin_voice:groups",
-                "Allows a player to use voice chat groups",
-                pumpkin_util::permission::PermissionDefault::Allow,
-            );
-            let _ = context.register_permission(permission_groups).await;
-
-            context
-                .register_command(
-                    commands::init_command_tree(state_manager.clone()),
-                    "pumpkin_voice:command.voicechat",
-                )
-                .await;
-
-            Ok(())
-        })
-    }
-}
-
-#[unsafe(no_mangle)]
-pub fn plugin() -> Box<dyn pumpkin::plugin::Plugin> {
-    Box::new(VoiceChatPlugin::new())
 }

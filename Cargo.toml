@@ -2,6 +2,9 @@
 name = "pumpkin_voice"
 version = "0.1.0"
 edition = "2021"
+authors = ["hmdnnrmn"]
+description = "Simple Voice Chat integration for PumpkinMC"
+license = "GPL-3.0"
 
 [lib] 
 crate-type = ["cdylib"]
