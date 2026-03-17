@@ -20,13 +20,13 @@ impl<T: Buf> BufExt for T {
 
     fn get_varint(&mut self) -> i32 {
         let mut num_read = 0;
-        let mut result = 0;
+        let mut result = 0u32;
         loop {
             if self.remaining() < 1 {
                 return 0;
             }
             let read = self.get_u8();
-            let value = (read & 0b0111_1111) as i32;
+            let value = (read & 0b0111_1111) as u32;
             result |= value << (7 * num_read);
 
             num_read += 1;
@@ -37,7 +37,7 @@ impl<T: Buf> BufExt for T {
                 break;
             }
         }
-        result
+        result as i32
     }
 
     fn get_byte_array(&mut self) -> Vec<u8> {

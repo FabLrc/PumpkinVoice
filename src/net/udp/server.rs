@@ -49,7 +49,7 @@ impl UdpServer {
             }
         });
 
-        let mut buf = [0; 2048];
+        let mut buf = [0u8; 4096];
         loop {
             match socket.recv_from(&mut buf).await {
                 Ok((len, src)) => {
